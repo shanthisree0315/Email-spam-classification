@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Email Spam Detection AWS
+Parameters:
+  EndPointName:
+    Description: "Sage maker endpoint"
+    Type: String
+
+  EmailS3BucketName:
+    Description: "Name of unique S3 bucket to be created"
+    Type: String
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn: EmailLambdaFunctionCloudFormation
+    Properties:
+      BucketName: !Ref EmailS3BucketName
+      AccessControl: PublicRead
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:Put
+            Function: !GetAtt [EmailLambdaFunctionCloudFormation, Arn]
+    DeletionPolicy: Retain
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Effect: Allow
+            Principal: "*"
+            Action: "*"
+            Resource: !Join
+              - ""
+              - - "arn:aws:s3:::"
+                - !Ref S3Bucket
+                - /*
+      Bucket: !Ref S3Bucket
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt EmailLambdaFunctionCloudFormation.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref "AWS::AccountId"
+      SourceArn: !Sub "arn:aws:s3:::${EmailS3BucketName}"
+  EmailLambdaRoleCloudFormation:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: emaillambdacloudformation-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonSESFullAccess
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Path: /
+  EmailLambdaFunctionCloudFormation:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Code:
+        S3Bucket: assignment3codeforlambda
+        S3Key: LF1.zip
+      Description: lambda code for spam detection
+      Layers:
+        - arn:aws:lambda:us-east-1:668099181075:layer:AWSLambda-Python37-SciPy1x:115
+      Environment:
+        Variables:
+          ENDPOINT_NAME: !Ref EndPointName
+      FunctionName: email_lambda_cloudformation
+      Handler: lambda_function.lambda_handler
+      MemorySize: 512
+      Role:
+        Fn::GetAtt:
+          - EmailLambdaRoleCloudFormation
+          - Arn
+      Runtime: python3.7
+      Timeout: 60
+  SESRuleSet:
+    Type: "AWS::SES::ReceiptRuleSet"
+  SESRule:
+    Type: "AWS::SES::ReceiptRule"
+    DependsOn: S3Bucket
+    Properties:
+      Rule:
+        Actions:
+          - S3Action:
+              BucketName: !Ref EmailS3BucketName
+        Enabled: true
+        ScanEnabled: false
+      RuleSetName: !Ref SESRuleSet
